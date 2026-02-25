@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="manifest" href="manifest.json">
   <title>Teacher Photo Editor</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -39,14 +41,7 @@
       touch-action: manipulation;
     }
 
-    /* ===== APP LAYOUT ===== */
-    .app {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-
-    /* ===== SCREENS ===== */
+    .app { display: flex; flex-direction: column; height: 100%; }
     .screen { display: none; flex-direction: column; height: 100%; }
     .screen.active { display: flex; }
 
@@ -76,7 +71,7 @@
     }
     .header-btn:active { background: rgba(255,255,255,0.35); }
 
-    /* ===== GALLERY SCREEN ===== */
+    /* ===== GALLERY ===== */
     .gallery-actions {
       display: flex;
       gap: 8px;
@@ -101,12 +96,30 @@
     .action-btn .icon { font-size: 1.6rem; }
     .action-btn:active { background: var(--gray-50); border-color: var(--blue); }
 
-    .gallery-status {
+    .gallery-status-bar {
       padding: 0 16px 8px;
-      font-size: 0.8rem;
-      color: var(--gray-500);
+      display: flex;
+      align-items: center;
+      gap: 8px;
       flex-shrink: 0;
     }
+    .gallery-status-text {
+      font-size: 0.8rem;
+      color: var(--gray-500);
+      flex: 1;
+    }
+    .batch-crop-btn {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 6px;
+      background: var(--amber-light);
+      color: #92400e;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .batch-crop-btn:active { background: #fde68a; }
+    .batch-crop-btn.hidden { display: none; }
 
     .gallery-grid {
       flex: 1;
@@ -127,54 +140,27 @@
       background: var(--gray-200);
       cursor: pointer;
     }
-    .gallery-item img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
+    .gallery-item img { width: 100%; height: 100%; object-fit: cover; }
     .gallery-item .item-name {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
+      position: absolute; bottom: 0; left: 0; right: 0;
       padding: 3px 6px;
       background: linear-gradient(transparent, rgba(0,0,0,0.7));
-      color: white;
-      font-size: 0.65rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      color: white; font-size: 0.65rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .gallery-item .item-badge {
-      position: absolute;
-      top: 4px;
-      left: 4px;
-      background: var(--green);
-      color: white;
-      font-size: 0.55rem;
-      padding: 2px 5px;
-      border-radius: 4px;
-      font-weight: 600;
+      position: absolute; top: 4px; left: 4px;
+      background: var(--green); color: white;
+      font-size: 0.55rem; padding: 2px 5px; border-radius: 4px; font-weight: 600;
     }
     .gallery-item .item-check {
-      position: absolute;
-      top: 4px;
-      right: 4px;
-      width: 22px;
-      height: 22px;
-      border-radius: 50%;
-      border: 2px solid white;
-      background: rgba(0,0,0,0.3);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-size: 0.7rem;
+      position: absolute; top: 4px; right: 4px;
+      width: 22px; height: 22px; border-radius: 50%;
+      border: 2px solid white; background: rgba(0,0,0,0.3);
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 0.7rem;
     }
-    .gallery-item.selected .item-check {
-      background: var(--blue);
-      border-color: var(--blue);
-    }
+    .gallery-item.selected .item-check { background: var(--blue); border-color: var(--blue); }
 
     .gallery-empty {
       grid-column: 1 / -1;
@@ -210,7 +196,103 @@
     .bottom-btn.danger { background: #fee2e2; color: var(--red); }
     .bottom-btn.secondary { background: var(--gray-100); color: var(--gray-700); }
 
-    /* ===== EDITOR SCREEN ===== */
+    /* ===== TOAST ===== */
+    .toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--gray-900);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      z-index: 100;
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ===== CONFIRM DIALOG ===== */
+    .confirm-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 50;
+      justify-content: center;
+      align-items: center;
+    }
+    .confirm-overlay.visible { display: flex; }
+    .confirm-dialog {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      margin: 20px;
+      max-width: 320px;
+      width: 100%;
+      text-align: center;
+    }
+    .confirm-dialog .confirm-title { font-weight: 600; font-size: 1rem; margin-bottom: 8px; }
+    .confirm-dialog .confirm-msg { font-size: 0.85rem; color: var(--gray-500); margin-bottom: 20px; }
+    .confirm-buttons { display: flex; gap: 10px; }
+    .confirm-buttons button {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .confirm-btn-cancel { background: var(--gray-100); color: var(--gray-700); }
+    .confirm-btn-ok { background: var(--red); color: white; }
+
+    /* ===== BATCH PROGRESS ===== */
+    .batch-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 50;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .batch-overlay.visible { display: flex; }
+    .batch-card {
+      background: white;
+      border-radius: 16px;
+      padding: 28px 32px;
+      text-align: center;
+      max-width: 300px;
+      width: 90%;
+    }
+    .batch-card .batch-title { font-weight: 600; margin-bottom: 12px; }
+    .batch-progress-bar {
+      height: 8px;
+      background: var(--gray-200);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .batch-progress-fill {
+      height: 100%;
+      background: var(--blue);
+      border-radius: 4px;
+      transition: width 0.2s;
+      width: 0%;
+    }
+    .batch-card .batch-status { font-size: 0.8rem; color: var(--gray-500); }
+
+    /* ===== EDITOR ===== */
     .editor-header {
       background: var(--gray-900);
       color: white;
@@ -222,31 +304,19 @@
       z-index: 10;
     }
     .editor-back {
-      background: none;
-      border: none;
-      color: white;
-      font-size: 1.4rem;
-      padding: 4px 8px;
-      cursor: pointer;
+      background: none; border: none; color: white;
+      font-size: 1.4rem; padding: 4px 8px; cursor: pointer;
     }
     .editor-name-input {
       flex: 1;
       background: rgba(255,255,255,0.1);
-      border: none;
-      color: white;
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 0.95rem;
+      border: none; color: white;
+      padding: 8px 12px; border-radius: 8px; font-size: 0.95rem;
     }
     .editor-name-input::placeholder { color: rgba(255,255,255,0.5); }
     .editor-name-input:focus { outline: none; background: rgba(255,255,255,0.2); }
-    .editor-counter {
-      font-size: 0.75rem;
-      opacity: 0.7;
-      white-space: nowrap;
-    }
+    .editor-counter { font-size: 0.75rem; opacity: 0.7; white-space: nowrap; }
 
-    /* Canvas area */
     .editor-canvas-area {
       flex: 1;
       background: var(--gray-900);
@@ -258,24 +328,14 @@
       touch-action: none;
     }
 
-    .canvas-container {
-      position: relative;
-      display: inline-block;
-      line-height: 0;
-    }
+    .canvas-container { position: relative; display: inline-block; line-height: 0; }
+    #photo-canvas { max-width: 100%; max-height: 100%; }
 
-    #photo-canvas {
-      max-width: 100%;
-      max-height: 100%;
-    }
-
-    /* Auto-crop suggestion banner */
+    /* Auto-crop banner */
     .auto-crop-banner {
       display: none;
       position: absolute;
-      top: 12px;
-      left: 12px;
-      right: 12px;
+      top: 12px; left: 12px; right: 12px;
       background: rgba(37, 99, 235, 0.95);
       color: white;
       border-radius: var(--radius);
@@ -285,26 +345,12 @@
       gap: 8px;
     }
     .auto-crop-banner.visible { display: flex; }
-    .auto-crop-banner .banner-text {
-      font-size: 0.85rem;
-      font-weight: 500;
-    }
-    .auto-crop-banner .banner-sub {
-      font-size: 0.75rem;
-      opacity: 0.85;
-    }
-    .banner-buttons {
-      display: flex;
-      gap: 8px;
-    }
+    .auto-crop-banner .banner-text { font-size: 0.85rem; font-weight: 500; }
+    .auto-crop-banner .banner-sub { font-size: 0.75rem; opacity: 0.85; }
+    .banner-buttons { display: flex; gap: 8px; }
     .banner-btn {
-      flex: 1;
-      padding: 10px;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
+      flex: 1; padding: 10px; border: none; border-radius: 8px;
+      font-size: 0.85rem; font-weight: 600; cursor: pointer;
     }
     .banner-btn.accept { background: white; color: var(--blue); }
     .banner-btn.accept:active { background: var(--gray-100); }
@@ -315,14 +361,11 @@
     /* Scanning spinner */
     .scan-overlay {
       display: none;
-      position: absolute;
-      inset: 0;
+      position: absolute; inset: 0;
       background: rgba(0,0,0,0.5);
       z-index: 25;
-      justify-content: center;
-      align-items: center;
-      flex-direction: column;
-      gap: 12px;
+      justify-content: center; align-items: center;
+      flex-direction: column; gap: 12px;
     }
     .scan-overlay.visible { display: flex; }
     .scan-spinner {
@@ -338,17 +381,12 @@
     /* Crop overlay */
     .crop-overlay {
       display: none;
-      position: absolute;
-      top: 0; left: 0;
-      width: 100%;
-      height: 100%;
-      cursor: crosshair;
-      z-index: 15;
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      cursor: crosshair; z-index: 15;
     }
     .crop-overlay.active { display: block; }
-
     .crop-shade { position: absolute; background: rgba(0,0,0,0.55); }
-
     .crop-selection {
       position: absolute;
       border: 2px solid white;
@@ -356,41 +394,28 @@
       display: none;
     }
     .crop-selection.visible { display: block; }
-    .crop-selection .crop-grid-line {
-      position: absolute;
-      background: rgba(255,255,255,0.3);
-    }
+    .crop-selection .crop-grid-line { position: absolute; background: rgba(255,255,255,0.3); }
     .crop-selection .crop-grid-line.h1 { left: 0; right: 0; top: 33.33%; height: 1px; }
     .crop-selection .crop-grid-line.h2 { left: 0; right: 0; top: 66.67%; height: 1px; }
     .crop-selection .crop-grid-line.v1 { top: 0; bottom: 0; left: 33.33%; width: 1px; }
     .crop-selection .crop-grid-line.v2 { top: 0; bottom: 0; left: 66.67%; width: 1px; }
 
     .crop-handle {
-      position: absolute;
-      width: 28px;
-      height: 28px;
-      background: transparent;
+      position: absolute; width: 28px; height: 28px; background: transparent;
     }
     .crop-handle::after {
-      content: '';
-      position: absolute;
-      background: white;
-      box-shadow: 0 0 2px rgba(0,0,0,0.5);
+      content: ''; position: absolute; background: white;
     }
     .crop-handle.nw { top: -14px; left: -14px; cursor: nw-resize; }
-    .crop-handle.nw::after { top: 12px; left: 12px; width: 16px; height: 3px; box-shadow: none; }
+    .crop-handle.nw::after { top: 12px; left: 12px; width: 16px; height: 3px; }
     .crop-handle.ne { top: -14px; right: -14px; cursor: ne-resize; }
-    .crop-handle.ne::after { top: 12px; right: 12px; width: 16px; height: 3px; box-shadow: none; }
+    .crop-handle.ne::after { top: 12px; right: 12px; width: 16px; height: 3px; }
     .crop-handle.sw { bottom: -14px; left: -14px; cursor: sw-resize; }
-    .crop-handle.sw::after { bottom: 12px; left: 12px; width: 16px; height: 3px; box-shadow: none; }
+    .crop-handle.sw::after { bottom: 12px; left: 12px; width: 16px; height: 3px; }
     .crop-handle.se { bottom: -14px; right: -14px; cursor: se-resize; }
-    .crop-handle.se::after { bottom: 12px; right: 12px; width: 16px; height: 3px; box-shadow: none; }
-    /* Corner L-shapes */
+    .crop-handle.se::after { bottom: 12px; right: 12px; width: 16px; height: 3px; }
     .crop-handle .corner-v {
-      position: absolute;
-      background: white;
-      width: 3px;
-      height: 16px;
+      position: absolute; background: white; width: 3px; height: 16px;
     }
     .crop-handle.nw .corner-v { top: 12px; left: 12px; }
     .crop-handle.ne .corner-v { top: 12px; right: 12px; }
@@ -409,23 +434,15 @@
     }
     .tool-btn {
       flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 3px;
-      padding: 8px 4px;
-      border: none;
-      border-radius: 8px;
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      padding: 8px 4px; border: none; border-radius: 8px;
       background: transparent;
       color: rgba(255,255,255,0.7);
-      font-size: 0.65rem;
-      font-weight: 500;
-      cursor: pointer;
+      font-size: 0.65rem; font-weight: 500; cursor: pointer;
     }
     .tool-btn .tool-icon { font-size: 1.3rem; }
     .tool-btn:active, .tool-btn.active { background: rgba(255,255,255,0.15); color: white; }
 
-    /* Crop-mode bottom bar */
     .crop-toolbar {
       display: none;
       background: var(--gray-900);
@@ -437,46 +454,29 @@
     }
     .crop-toolbar.visible { display: flex; }
     .crop-action-btn {
-      flex: 1;
-      padding: 12px;
-      border: none;
+      flex: 1; padding: 12px; border: none;
       border-radius: var(--radius);
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
+      font-size: 0.9rem; font-weight: 600; cursor: pointer;
     }
     .crop-action-btn.apply { background: var(--green); color: white; }
     .crop-action-btn.apply:active { background: #15803d; }
     .crop-action-btn.cancel { background: rgba(255,255,255,0.1); color: white; }
     .crop-action-btn.cancel:active { background: rgba(255,255,255,0.2); }
 
-    /* Photo navigation arrows */
     .nav-arrows {
-      position: absolute;
-      bottom: 10px;
-      left: 50%;
+      position: absolute; bottom: 10px; left: 50%;
       transform: translateX(-50%);
-      display: flex;
-      gap: 16px;
-      z-index: 10;
+      display: flex; gap: 16px; z-index: 10;
     }
     .nav-arrow {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: rgba(0,0,0,0.4);
-      border: none;
-      color: white;
-      font-size: 1.2rem;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(0,0,0,0.4); border: none;
+      color: white; font-size: 1.2rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
     }
     .nav-arrow:active { background: rgba(0,0,0,0.6); }
     .nav-arrow:disabled { opacity: 0.3; }
 
-    /* Hidden file inputs */
     .hidden { display: none !important; }
 
     @media (min-width: 768px) {
@@ -510,10 +510,13 @@
       </div>
     </div>
 
-    <div class="gallery-status" id="gallery-status"></div>
+    <div class="gallery-status-bar">
+      <span class="gallery-status-text" id="gallery-status"></span>
+      <button class="batch-crop-btn hidden" id="btn-batch-crop">Auto Crop All</button>
+    </div>
 
     <div class="gallery-grid" id="gallery-grid">
-      <div class="gallery-empty" id="gallery-empty">
+      <div class="gallery-empty">
         <div class="empty-icon">&#128247;</div>
         <p>No photos yet!</p>
         <p style="margin-top:8px;font-size:0.85rem;">Take photos or upload from your gallery to get started.</p>
@@ -521,6 +524,7 @@
     </div>
 
     <div class="gallery-bottom" id="gallery-bottom">
+      <button class="bottom-btn secondary" id="btn-deselect">Cancel</button>
       <button class="bottom-btn danger" id="btn-delete-selected">Delete</button>
       <button class="bottom-btn primary" id="btn-save-selected">Save Selected</button>
     </div>
@@ -558,7 +562,6 @@
         </div>
       </div>
 
-      <!-- Auto-crop banner -->
       <div class="auto-crop-banner" id="auto-crop-banner">
         <div>
           <div class="banner-text">Auto-crop detected</div>
@@ -571,50 +574,70 @@
         </div>
       </div>
 
-      <!-- Scanning overlay -->
       <div class="scan-overlay" id="scan-overlay">
         <div class="scan-spinner"></div>
         <div class="scan-text">Scanning for project edges...</div>
       </div>
 
-      <!-- Nav arrows -->
       <div class="nav-arrows">
         <button class="nav-arrow" id="btn-prev">&#x2039;</button>
         <button class="nav-arrow" id="btn-next">&#x203A;</button>
       </div>
     </div>
 
-    <!-- Normal toolbar -->
     <div class="editor-toolbar" id="editor-toolbar">
       <button class="tool-btn" id="tool-rotate-left">
-        <span class="tool-icon">&#x21BA;</span>
-        Rotate L
+        <span class="tool-icon">&#x21BA;</span>Rotate L
       </button>
       <button class="tool-btn" id="tool-rotate-right">
-        <span class="tool-icon">&#x21BB;</span>
-        Rotate R
+        <span class="tool-icon">&#x21BB;</span>Rotate R
       </button>
       <button class="tool-btn" id="tool-auto-crop">
-        <span class="tool-icon">&#x2728;</span>
-        Auto Crop
+        <span class="tool-icon">&#x2728;</span>Auto Crop
       </button>
       <button class="tool-btn" id="tool-manual-crop">
-        <span class="tool-icon">&#x2702;</span>
-        Crop
+        <span class="tool-icon">&#x2702;</span>Crop
+      </button>
+      <button class="tool-btn" id="tool-undo">
+        <span class="tool-icon">&#x21A9;</span>Undo
       </button>
       <button class="tool-btn" id="tool-save">
-        <span class="tool-icon">&#x2B73;</span>
-        Save
+        <span class="tool-icon">&#x2B73;</span>Save
       </button>
     </div>
 
-    <!-- Crop-mode toolbar -->
     <div class="crop-toolbar" id="crop-toolbar">
       <button class="crop-action-btn cancel" id="btn-crop-cancel">Cancel</button>
       <button class="crop-action-btn apply" id="btn-crop-apply">Apply Crop</button>
     </div>
   </div>
 
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
+<!-- Confirm dialog -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-dialog">
+    <div class="confirm-title" id="confirm-title">Delete photos?</div>
+    <div class="confirm-msg" id="confirm-msg">This cannot be undone.</div>
+    <div class="confirm-buttons">
+      <button class="confirm-btn-cancel" id="confirm-cancel">Cancel</button>
+      <button class="confirm-btn-ok" id="confirm-ok">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Batch progress -->
+<div class="batch-overlay" id="batch-overlay">
+  <div class="batch-card">
+    <div class="batch-title" id="batch-title">Auto-cropping all photos...</div>
+    <div class="batch-progress-bar">
+      <div class="batch-progress-fill" id="batch-progress-fill"></div>
+    </div>
+    <div class="batch-status" id="batch-status">0 / 0</div>
+  </div>
 </div>
 
 <script>
@@ -632,12 +655,12 @@
   let movingCrop = false;
   let moveStart = null;
   let autoCropResult = null;
+  let confirmCallback = null;
 
   // ===== DOM REFS =====
   const screenGallery = document.getElementById('screen-gallery');
   const screenEditor  = document.getElementById('screen-editor');
   const galleryGrid   = document.getElementById('gallery-grid');
-  const galleryEmpty  = document.getElementById('gallery-empty');
   const galleryStatus = document.getElementById('gallery-status');
   const galleryBottom = document.getElementById('gallery-bottom');
   const fileCamera    = document.getElementById('file-camera');
@@ -646,7 +669,6 @@
   const editorCounter = document.getElementById('editor-counter');
   const canvas        = document.getElementById('photo-canvas');
   const ctx           = canvas.getContext('2d');
-  const canvasContainer = document.getElementById('canvas-container');
   const editorCanvasArea = document.getElementById('editor-canvas-area');
   const cropOverlay   = document.getElementById('crop-overlay');
   const cropSelection = document.getElementById('crop-selection');
@@ -654,13 +676,50 @@
   const cropToolbar   = document.getElementById('crop-toolbar');
   const autoCropBanner = document.getElementById('auto-crop-banner');
   const scanOverlay   = document.getElementById('scan-overlay');
+  const toastEl       = document.getElementById('toast');
+  const confirmOverlay = document.getElementById('confirm-overlay');
+  const batchOverlay  = document.getElementById('batch-overlay');
+  const batchFill     = document.getElementById('batch-progress-fill');
+  const batchStatus   = document.getElementById('batch-status');
+  const btnBatchCrop  = document.getElementById('btn-batch-crop');
 
-  // ===== GALLERY =====
+  // ===== HELPERS =====
+  function escHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  let toastTimer;
+  function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+  }
+
+  function showConfirm(title, msg, okLabel, cb) {
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-msg').textContent = msg;
+    document.getElementById('confirm-ok').textContent = okLabel;
+    confirmCallback = cb;
+    confirmOverlay.classList.add('visible');
+  }
+  document.getElementById('confirm-cancel').addEventListener('click', () => {
+    confirmOverlay.classList.remove('visible');
+    confirmCallback = null;
+  });
+  document.getElementById('confirm-ok').addEventListener('click', () => {
+    confirmOverlay.classList.remove('visible');
+    if (confirmCallback) { confirmCallback(); confirmCallback = null; }
+  });
+
   function showScreen(name) {
     screenGallery.classList.toggle('active', name === 'gallery');
     screenEditor.classList.toggle('active', name === 'editor');
   }
 
+  // ===== GALLERY =====
   document.getElementById('btn-camera').addEventListener('click', () => fileCamera.click());
   document.getElementById('btn-upload').addEventListener('click', () => fileUpload.click());
 
@@ -668,24 +727,24 @@
     handleFiles(fileCamera.files, true);
     fileCamera.value = '';
   });
-
   fileUpload.addEventListener('change', () => {
     handleFiles(fileUpload.files, true);
     fileUpload.value = '';
   });
 
   function handleFiles(files, openFirst) {
-    let firstNewIndex = photos.length;
+    const firstNewIndex = photos.length;
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
     let loaded = 0;
-    const total = files.length;
-    for (const file of files) {
-      if (!file.type.startsWith('image/')) { loaded++; continue; }
+
+    imageFiles.forEach((file, fileIdx) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const img = new Image();
         img.onload = () => {
           const baseName = file.name.replace(/\.[^.]+$/, '');
-          photos.push({
+          const photo = {
             id: Date.now() + '_' + Math.random().toString(36).slice(2,7),
             name: baseName,
             originalImg: img,
@@ -693,17 +752,20 @@
             rotation: 0,
             cropped: false,
             selected: false,
-          });
+            thumbCache: null,
+          };
+          // Insert at correct position to preserve file order
+          photos.splice(firstNewIndex + fileIdx, 0, photo);
           loaded++;
-          renderGallery();
-          if (loaded === total && openFirst && photos.length > 0) {
-            openEditor(firstNewIndex);
+          if (loaded === imageFiles.length) {
+            renderGallery();
+            if (openFirst) openEditor(firstNewIndex);
           }
         };
         img.src = e.target.result;
       };
       reader.readAsDataURL(file);
-    }
+    });
   }
 
   function renderGallery() {
@@ -717,22 +779,44 @@
         </div>`;
       galleryStatus.textContent = '';
       galleryBottom.classList.remove('visible');
+      btnBatchCrop.classList.add('hidden');
       return;
     }
 
     const cropped = photos.filter(p => p.cropped).length;
+    const uncropped = photos.length - cropped;
     galleryStatus.textContent = `${photos.length} photo${photos.length !== 1 ? 's' : ''} \u00B7 ${cropped} cropped`;
+    btnBatchCrop.classList.toggle('hidden', uncropped === 0);
 
     photos.forEach((photo, idx) => {
       const div = document.createElement('div');
       div.className = 'gallery-item' + (photo.selected ? ' selected' : '');
       div.innerHTML = `
-        <img src="${getThumbSrc(photo)}" alt="${photo.name}">
-        <div class="item-name">${photo.name || 'Untitled'}</div>
+        <img src="${getThumbSrc(photo)}" alt="">
+        <div class="item-name">${escHtml(photo.name || 'Untitled')}</div>
         ${photo.cropped ? '<div class="item-badge">Cropped</div>' : ''}
         <div class="item-check">${photo.selected ? '&#x2713;' : ''}</div>
       `;
-      div.addEventListener('click', (e) => {
+      // Touch: long-press to enter select mode
+      let pressTimer = null;
+      let pressTriggered = false;
+      div.addEventListener('touchstart', () => {
+        pressTriggered = false;
+        pressTimer = setTimeout(() => {
+          pressTriggered = true;
+          selectMode = true;
+          photo.selected = true;
+          renderGallery();
+        }, 500);
+      }, { passive: true });
+      div.addEventListener('touchend', (e) => {
+        clearTimeout(pressTimer);
+        if (pressTriggered) { e.preventDefault(); return; }
+      });
+      div.addEventListener('touchmove', () => { clearTimeout(pressTimer); });
+
+      div.addEventListener('click', () => {
+        if (pressTriggered) return;
         if (selectMode) {
           photo.selected = !photo.selected;
           renderGallery();
@@ -740,31 +824,16 @@
         }
         openEditor(idx);
       });
-      div.addEventListener('long-press', () => {
-        selectMode = true;
-        photo.selected = true;
-        renderGallery();
-      });
-      // Long press via touch
-      let pressTimer;
-      div.addEventListener('touchstart', (e) => {
-        pressTimer = setTimeout(() => {
-          selectMode = true;
-          photo.selected = true;
-          renderGallery();
-        }, 500);
-      }, { passive: true });
-      div.addEventListener('touchend', () => clearTimeout(pressTimer));
-      div.addEventListener('touchmove', () => clearTimeout(pressTimer));
 
       galleryGrid.appendChild(div);
     });
 
     const anySelected = photos.some(p => p.selected);
-    galleryBottom.classList.toggle('visible', anySelected);
+    galleryBottom.classList.toggle('visible', anySelected || selectMode);
   }
 
   function getThumbSrc(photo) {
+    if (photo.thumbCache) return photo.thumbCache;
     const tmpC = document.createElement('canvas');
     const tmpCtx = tmpC.getContext('2d');
     const img = photo.currentImg;
@@ -772,35 +841,138 @@
     let w, h;
     if (rot === 90 || rot === 270) { w = img.height; h = img.width; }
     else { w = img.width; h = img.height; }
-    // Thumbnail size
     const scale = Math.min(200 / w, 200 / h, 1);
     tmpC.width = Math.round(w * scale);
     tmpC.height = Math.round(h * scale);
     tmpCtx.translate(tmpC.width / 2, tmpC.height / 2);
     tmpCtx.rotate(rot * Math.PI / 180);
     tmpCtx.drawImage(img, -img.width * scale / 2, -img.height * scale / 2, img.width * scale, img.height * scale);
-    return tmpC.toDataURL('image/jpeg', 0.6);
+    photo.thumbCache = tmpC.toDataURL('image/jpeg', 0.6);
+    return photo.thumbCache;
   }
 
-  // Delete / Save selected
-  document.getElementById('btn-delete-selected').addEventListener('click', () => {
-    for (let i = photos.length - 1; i >= 0; i--) {
-      if (photos[i].selected) photos.splice(i, 1);
-    }
-    selectMode = false;
-    renderGallery();
-  });
+  function invalidateThumb(photo) {
+    photo.thumbCache = null;
+  }
 
-  document.getElementById('btn-save-selected').addEventListener('click', () => {
-    photos.filter(p => p.selected).forEach(p => downloadPhoto(p));
+  // Deselect / exit select mode
+  document.getElementById('btn-deselect').addEventListener('click', () => {
     photos.forEach(p => p.selected = false);
     selectMode = false;
     renderGallery();
   });
 
-  document.getElementById('btn-save-all').addEventListener('click', () => {
-    photos.forEach(p => downloadPhoto(p));
+  // Delete selected with confirmation
+  document.getElementById('btn-delete-selected').addEventListener('click', () => {
+    const count = photos.filter(p => p.selected).length;
+    if (count === 0) return;
+    showConfirm(
+      `Delete ${count} photo${count !== 1 ? 's' : ''}?`,
+      'This cannot be undone.',
+      'Delete',
+      () => {
+        for (let i = photos.length - 1; i >= 0; i--) {
+          if (photos[i].selected) photos.splice(i, 1);
+        }
+        selectMode = false;
+        renderGallery();
+        showToast(`${count} photo${count !== 1 ? 's' : ''} deleted`);
+      }
+    );
   });
+
+  // Save selected
+  document.getElementById('btn-save-selected').addEventListener('click', () => {
+    const selected = photos.filter(p => p.selected);
+    if (selected.length === 0) return;
+    selected.forEach(p => downloadPhoto(p));
+    photos.forEach(p => p.selected = false);
+    selectMode = false;
+    renderGallery();
+    showToast(`${selected.length} photo${selected.length !== 1 ? 's' : ''} saved`);
+  });
+
+  // Save all
+  document.getElementById('btn-save-all').addEventListener('click', () => {
+    if (photos.length === 0) { showToast('No photos to save'); return; }
+    photos.forEach(p => downloadPhoto(p));
+    showToast(`${photos.length} photo${photos.length !== 1 ? 's' : ''} saved`);
+  });
+
+  // ===== BATCH AUTO-CROP =====
+  btnBatchCrop.addEventListener('click', () => {
+    const uncropped = photos.filter(p => !p.cropped);
+    if (uncropped.length === 0) { showToast('All photos already cropped'); return; }
+    runBatchAutoCrop(uncropped);
+  });
+
+  function runBatchAutoCrop(targets) {
+    batchOverlay.classList.add('visible');
+    let processed = 0;
+    let success = 0;
+    const total = targets.length;
+    batchFill.style.width = '0%';
+    batchStatus.textContent = `0 / ${total}`;
+
+    function processNext() {
+      if (processed >= total) {
+        batchOverlay.classList.remove('visible');
+        renderGallery();
+        showToast(`Auto-cropped ${success} of ${total} photos`);
+        return;
+      }
+      const photo = targets[processed];
+      const bounds = detectProjectBounds(photo);
+      if (bounds) {
+        applyAutoCropToPhoto(photo, bounds);
+        success++;
+      }
+      processed++;
+      batchFill.style.width = Math.round((processed / total) * 100) + '%';
+      batchStatus.textContent = `${processed} / ${total}`;
+      // Yield to UI
+      setTimeout(processNext, 20);
+    }
+    setTimeout(processNext, 50);
+  }
+
+  function applyAutoCropToPhoto(photo, rect) {
+    // Render the photo to a temp canvas, crop, and replace
+    const img = photo.currentImg;
+    const rot = photo.rotation;
+    let w, h;
+    if (rot === 90 || rot === 270) { w = img.height; h = img.width; }
+    else { w = img.width; h = img.height; }
+
+    const tmpC = document.createElement('canvas');
+    const tmpCtx = tmpC.getContext('2d');
+    tmpC.width = w;
+    tmpC.height = h;
+    tmpCtx.translate(w / 2, h / 2);
+    tmpCtx.rotate(rot * Math.PI / 180);
+    tmpCtx.drawImage(img, -img.width / 2, -img.height / 2);
+
+    const sx = Math.max(0, Math.round(rect.x));
+    const sy = Math.max(0, Math.round(rect.y));
+    const sw = Math.min(w - sx, Math.round(rect.w));
+    const sh = Math.min(h - sy, Math.round(rect.h));
+    if (sw < 10 || sh < 10) return;
+
+    const imgData = tmpCtx.getImageData(sx, sy, sw, sh);
+    const cropC = document.createElement('canvas');
+    cropC.width = sw;
+    cropC.height = sh;
+    cropC.getContext('2d').putImageData(imgData, 0, 0);
+
+    const newImg = new Image();
+    newImg.onload = () => {
+      photo.currentImg = newImg;
+      photo.rotation = 0;
+      photo.cropped = true;
+      invalidateThumb(photo);
+    };
+    newImg.src = cropC.toDataURL();
+  }
 
   // ===== EDITOR =====
   function openEditor(idx) {
@@ -809,7 +981,11 @@
     exitCropMode();
     autoCropBanner.classList.remove('visible');
     loadActivePhoto();
-    runAutoCrop();
+    // Only auto-scan if not already cropped
+    const photo = getActive();
+    if (photo && !photo.cropped) {
+      runAutoCrop();
+    }
   }
 
   document.getElementById('btn-back').addEventListener('click', () => {
@@ -832,18 +1008,29 @@
 
   editorName.addEventListener('input', () => {
     const photo = getActive();
-    if (photo) photo.name = editorName.value;
+    if (photo) {
+      photo.name = editorName.value;
+      invalidateThumb(photo);
+    }
   });
 
-  // Navigation
+  function navigateTo(idx) {
+    activeIndex = idx;
+    exitCropMode();
+    autoCropBanner.classList.remove('visible');
+    loadActivePhoto();
+    const photo = getActive();
+    if (photo && !photo.cropped) runAutoCrop();
+  }
+
   document.getElementById('btn-prev').addEventListener('click', () => {
-    if (activeIndex > 0) { activeIndex--; exitCropMode(); autoCropBanner.classList.remove('visible'); loadActivePhoto(); runAutoCrop(); }
+    if (activeIndex > 0) navigateTo(activeIndex - 1);
   });
   document.getElementById('btn-next').addEventListener('click', () => {
-    if (activeIndex < photos.length - 1) { activeIndex++; exitCropMode(); autoCropBanner.classList.remove('visible'); loadActivePhoto(); runAutoCrop(); }
+    if (activeIndex < photos.length - 1) navigateTo(activeIndex + 1);
   });
 
-  // Swipe navigation
+  // Swipe
   let swipeStartX = null;
   editorCanvasArea.addEventListener('touchstart', (e) => {
     if (cropMode) return;
@@ -854,11 +1041,8 @@
     const dx = e.changedTouches[0].clientX - swipeStartX;
     swipeStartX = null;
     if (Math.abs(dx) > 60) {
-      if (dx < 0 && activeIndex < photos.length - 1) {
-        activeIndex++; exitCropMode(); autoCropBanner.classList.remove('visible'); loadActivePhoto(); runAutoCrop();
-      } else if (dx > 0 && activeIndex > 0) {
-        activeIndex--; exitCropMode(); autoCropBanner.classList.remove('visible'); loadActivePhoto(); runAutoCrop();
-      }
+      if (dx < 0 && activeIndex < photos.length - 1) navigateTo(activeIndex + 1);
+      else if (dx > 0 && activeIndex > 0) navigateTo(activeIndex - 1);
     }
   }, { passive: true });
 
@@ -884,18 +1068,33 @@
   document.getElementById('tool-rotate-left').addEventListener('click', () => {
     const p = getActive(); if (!p) return;
     p.rotation = (p.rotation + 270) % 360;
+    invalidateThumb(p);
     drawPhoto();
   });
   document.getElementById('tool-rotate-right').addEventListener('click', () => {
     const p = getActive(); if (!p) return;
     p.rotation = (p.rotation + 90) % 360;
+    invalidateThumb(p);
     drawPhoto();
   });
 
-  // ===== AI AUTO-CROP =====
-  document.getElementById('tool-auto-crop').addEventListener('click', () => {
-    runAutoCrop();
+  // Undo — reset to original
+  document.getElementById('tool-undo').addEventListener('click', () => {
+    const p = getActive(); if (!p) return;
+    if (p.currentImg === p.originalImg && p.rotation === 0) {
+      showToast('Nothing to undo');
+      return;
+    }
+    p.currentImg = p.originalImg;
+    p.rotation = 0;
+    p.cropped = false;
+    invalidateThumb(p);
+    drawPhoto();
+    showToast('Reset to original');
   });
+
+  // ===== AI AUTO-CROP (IMPROVED) =====
+  document.getElementById('tool-auto-crop').addEventListener('click', () => runAutoCrop());
 
   function runAutoCrop() {
     const photo = getActive();
@@ -903,23 +1102,20 @@
     scanOverlay.classList.add('visible');
     autoCropBanner.classList.remove('visible');
 
-    // Run async so the spinner shows
     setTimeout(() => {
       autoCropResult = detectProjectBounds(photo);
       scanOverlay.classList.remove('visible');
 
       if (autoCropResult) {
-        // Show the suggestion on canvas
         showAutoCropPreview(autoCropResult);
         autoCropBanner.classList.add('visible');
       } else {
         autoCropBanner.classList.remove('visible');
       }
-    }, 300);
+    }, 100);
   }
 
   function detectProjectBounds(photo) {
-    // Render the current state to a temp canvas for analysis
     const img = photo.currentImg;
     const rot = photo.rotation;
     let w, h;
@@ -929,8 +1125,8 @@
     const tmpC = document.createElement('canvas');
     const tmpCtx = tmpC.getContext('2d');
 
-    // Downsample for speed (max 400px on long side)
-    const maxDim = 400;
+    // Downsample for speed
+    const maxDim = 500;
     const scale = Math.min(maxDim / w, maxDim / h, 1);
     const sw = Math.round(w * scale);
     const sh = Math.round(h * scale);
@@ -943,56 +1139,129 @@
     const imageData = tmpCtx.getImageData(0, 0, sw, sh);
     const data = imageData.data;
 
-    // Step 1: Sample border pixels to estimate background color
-    const borderPixels = [];
-    const margin = Math.max(2, Math.round(Math.min(sw, sh) * 0.03));
-    for (let x = 0; x < sw; x++) {
-      for (let row of [0, 1, sh - 2, sh - 1]) {
-        if (row >= 0 && row < sh) {
-          const i = (row * sw + x) * 4;
-          borderPixels.push([data[i], data[i+1], data[i+2]]);
-        }
-      }
+    // Step 1: Convert to grayscale + collect pixel luminances
+    const gray = new Float32Array(sw * sh);
+    for (let i = 0; i < sw * sh; i++) {
+      const ri = i * 4;
+      gray[i] = 0.299 * data[ri] + 0.587 * data[ri+1] + 0.114 * data[ri+2];
     }
-    for (let y = margin; y < sh - margin; y++) {
-      for (let col of [0, 1, sw - 2, sw - 1]) {
-        if (col >= 0 && col < sw) {
-          const i = (y * sw + col) * 4;
-          borderPixels.push([data[i], data[i+1], data[i+2]]);
+
+    // Step 2: Gaussian blur (3x3, sigma ~1)
+    const blurred = gaussianBlur3x3(gray, sw, sh);
+
+    // Step 3: Sobel edge detection
+    const edges = sobelEdges(blurred, sw, sh);
+
+    // Step 4: Sample wide border band for background color (10% of each edge)
+    const bandW = Math.max(4, Math.round(sw * 0.1));
+    const bandH = Math.max(4, Math.round(sh * 0.1));
+    const borderPixels = [];
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        if (y < bandH || y >= sh - bandH || x < bandW || x >= sw - bandW) {
+          const ri = (y * sw + x) * 4;
+          borderPixels.push([data[ri], data[ri+1], data[ri+2]]);
         }
       }
     }
 
-    // Compute median background color
     const bgR = median(borderPixels.map(p => p[0]));
     const bgG = median(borderPixels.map(p => p[1]));
     const bgB = median(borderPixels.map(p => p[2]));
 
-    // Step 2: Create foreground mask based on color distance from background
+    // Step 5: Build foreground mask combining color distance + edge strength
+    // Adaptive threshold: compute standard deviation of color distances
+    const colorDists = new Float32Array(sw * sh);
+    let distSum = 0, distSqSum = 0;
+    for (let i = 0; i < sw * sh; i++) {
+      const ri = i * 4;
+      const dr = data[ri] - bgR;
+      const dg = data[ri+1] - bgG;
+      const db = data[ri+2] - bgB;
+      const d = Math.sqrt(dr*dr + dg*dg + db*db);
+      colorDists[i] = d;
+      distSum += d;
+      distSqSum += d * d;
+    }
+    const distMean = distSum / (sw * sh);
+    const distStd = Math.sqrt(distSqSum / (sw * sh) - distMean * distMean);
+    // Adaptive threshold: mean - 0.5 * std, clamped to [20, 60]
+    const colorThreshold = clamp(distMean - 0.5 * distStd, 20, 60);
+
+    // Normalize edge magnitudes
+    let edgeMax = 0;
+    for (let i = 0; i < edges.length; i++) {
+      if (edges[i] > edgeMax) edgeMax = edges[i];
+    }
+    const edgeThreshold = edgeMax * 0.15;
+
+    // Combined mask: pixel is foreground if color differs OR strong edge
     const mask = new Uint8Array(sw * sh);
-    const threshold = 35; // color distance threshold
+    for (let i = 0; i < sw * sh; i++) {
+      mask[i] = (colorDists[i] > colorThreshold || edges[i] > edgeThreshold) ? 1 : 0;
+    }
+
+    // Step 6: Morphological close (dilate then erode) to fill small gaps, then open (erode then dilate) to remove noise
+    const radius = Math.max(2, Math.round(Math.min(sw, sh) * 0.008));
+    const closed = morphDilate(mask, sw, sh, radius);
+    const closedEroded = morphErode(closed, sw, sh, radius);
+    const opened = morphErode(closedEroded, sw, sh, radius + 1);
+    const cleaned = morphDilate(opened, sw, sh, radius + 1);
+
+    // Step 7: Connected component analysis — find the largest foreground region
+    const labels = new Int32Array(sw * sh);
+    labels.fill(-1);
+    const componentSizes = [];
+    let nextLabel = 0;
+
     for (let y = 0; y < sh; y++) {
       for (let x = 0; x < sw; x++) {
-        const i = (y * sw + x) * 4;
-        const dr = data[i] - bgR;
-        const dg = data[i+1] - bgG;
-        const db = data[i+2] - bgB;
-        const dist = Math.sqrt(dr*dr + dg*dg + db*db);
-        mask[y * sw + x] = dist > threshold ? 1 : 0;
+        const idx = y * sw + x;
+        if (cleaned[idx] && labels[idx] === -1) {
+          // BFS flood fill
+          const label = nextLabel++;
+          let size = 0;
+          const queue = [idx];
+          labels[idx] = label;
+          while (queue.length > 0) {
+            const ci = queue.pop();
+            size++;
+            const cx = ci % sw;
+            const cy = (ci - cx) / sw;
+            const neighbors = [
+              cy > 0 ? ci - sw : -1,
+              cy < sh - 1 ? ci + sw : -1,
+              cx > 0 ? ci - 1 : -1,
+              cx < sw - 1 ? ci + 1 : -1,
+            ];
+            for (const ni of neighbors) {
+              if (ni >= 0 && cleaned[ni] && labels[ni] === -1) {
+                labels[ni] = label;
+                queue.push(ni);
+              }
+            }
+          }
+          componentSizes.push({ label, size });
+        }
       }
     }
 
-    // Step 3: Morphological operations - erode then dilate to remove noise
-    const eroded = morphErode(mask, sw, sh, 2);
-    const cleaned = morphDilate(eroded, sw, sh, 2);
+    if (componentSizes.length === 0) return null;
 
-    // Step 4: Find bounding box of foreground region
+    // Find largest component
+    componentSizes.sort((a, b) => b.size - a.size);
+    const largestLabel = componentSizes[0].label;
+    const largestSize = componentSizes[0].size;
+
+    // Check if detection is meaningful
+    const fgRatio = largestSize / (sw * sh);
+    if (fgRatio < 0.05 || fgRatio > 0.92) return null;
+
+    // Step 8: Bounding box of the largest component
     let minX = sw, minY = sh, maxX = 0, maxY = 0;
-    let fgCount = 0;
     for (let y = 0; y < sh; y++) {
       for (let x = 0; x < sw; x++) {
-        if (cleaned[y * sw + x]) {
-          fgCount++;
+        if (labels[y * sw + x] === largestLabel) {
           if (x < minX) minX = x;
           if (x > maxX) maxX = x;
           if (y < minY) minY = y;
@@ -1001,19 +1270,15 @@
       }
     }
 
-    // Check if detection is meaningful
-    const fgRatio = fgCount / (sw * sh);
-    if (fgRatio < 0.05 || fgRatio > 0.95) return null; // Too small or too large
-    if (maxX - minX < sw * 0.1 || maxY - minY < sh * 0.1) return null;
+    if (maxX - minX < sw * 0.08 || maxY - minY < sh * 0.08) return null;
 
-    // Step 5: Add small padding
-    const pad = Math.round(Math.min(sw, sh) * 0.01);
+    // Step 9: Padding
+    const pad = Math.round(Math.min(sw, sh) * 0.015);
     minX = Math.max(0, minX - pad);
     minY = Math.max(0, minY - pad);
     maxX = Math.min(sw - 1, maxX + pad);
     maxY = Math.min(sh - 1, maxY + pad);
 
-    // Convert back to full-resolution canvas coordinates
     return {
       x: Math.round(minX / scale),
       y: Math.round(minY / scale),
@@ -1022,22 +1287,68 @@
     };
   }
 
-  function median(arr) {
-    const sorted = arr.slice().sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  // --- Image processing helpers ---
+  function gaussianBlur3x3(src, w, h) {
+    // 3x3 Gaussian kernel: [1 2 1; 2 4 2; 1 2 1] / 16
+    const out = new Float32Array(w * h);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        out[y * w + x] = (
+          src[(y-1)*w + (x-1)] * 1 + src[(y-1)*w + x] * 2 + src[(y-1)*w + (x+1)] * 1 +
+          src[y*w + (x-1)]     * 2 + src[y*w + x]     * 4 + src[y*w + (x+1)]     * 2 +
+          src[(y+1)*w + (x-1)] * 1 + src[(y+1)*w + x] * 2 + src[(y+1)*w + (x+1)] * 1
+        ) / 16;
+      }
+    }
+    // Copy edges
+    for (let x = 0; x < w; x++) { out[x] = src[x]; out[(h-1)*w + x] = src[(h-1)*w + x]; }
+    for (let y = 0; y < h; y++) { out[y*w] = src[y*w]; out[y*w + w - 1] = src[y*w + w - 1]; }
+    return out;
   }
 
-  function morphErode(mask, w, h, radius) {
-    const out = new Uint8Array(w * h);
-    for (let y = radius; y < h - radius; y++) {
-      for (let x = radius; x < w - radius; x++) {
+  function sobelEdges(gray, w, h) {
+    const out = new Float32Array(w * h);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const tl = gray[(y-1)*w+(x-1)], tc = gray[(y-1)*w+x], tr = gray[(y-1)*w+(x+1)];
+        const ml = gray[y*w+(x-1)],                             mr = gray[y*w+(x+1)];
+        const bl = gray[(y+1)*w+(x-1)], bc = gray[(y+1)*w+x], br = gray[(y+1)*w+(x+1)];
+        const gx = -tl - 2*ml - bl + tr + 2*mr + br;
+        const gy = -tl - 2*tc - tr + bl + 2*bc + br;
+        out[y * w + x] = Math.sqrt(gx*gx + gy*gy);
+      }
+    }
+    return out;
+  }
+
+  function median(arr) {
+    const sorted = arr.slice().sort((a, b) => a - b);
+    const mid = sorted.length >> 1;
+    return sorted.length & 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  function morphErode(mask, w, h, r) {
+    // Separable erosion for speed: horizontal then vertical
+    const tmp = new Uint8Array(w * h);
+    // Horizontal pass
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
         let all = true;
-        outer:
-        for (let dy = -radius; dy <= radius; dy++) {
-          for (let dx = -radius; dx <= radius; dx++) {
-            if (!mask[(y + dy) * w + (x + dx)]) { all = false; break outer; }
-          }
+        for (let dx = -r; dx <= r && all; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= w || !mask[y * w + nx]) all = false;
+        }
+        tmp[y * w + x] = all ? 1 : 0;
+      }
+    }
+    // Vertical pass
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let all = true;
+        for (let dy = -r; dy <= r && all; dy++) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= h || !tmp[ny * w + x]) all = false;
         }
         out[y * w + x] = all ? 1 : 0;
       }
@@ -1045,16 +1356,25 @@
     return out;
   }
 
-  function morphDilate(mask, w, h, radius) {
+  function morphDilate(mask, w, h, r) {
+    const tmp = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let any = false;
+        for (let dx = -r; dx <= r && !any; dx++) {
+          const nx = x + dx;
+          if (nx >= 0 && nx < w && mask[y * w + nx]) any = true;
+        }
+        tmp[y * w + x] = any ? 1 : 0;
+      }
+    }
     const out = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         let any = false;
-        for (let dy = -radius; dy <= radius && !any; dy++) {
-          for (let dx = -radius; dx <= radius && !any; dx++) {
-            const ny = y + dy, nx = x + dx;
-            if (ny >= 0 && ny < h && nx >= 0 && nx < w && mask[ny * w + nx]) any = true;
-          }
+        for (let dy = -r; dy <= r && !any; dy++) {
+          const ny = y + dy;
+          if (ny >= 0 && ny < h && tmp[ny * w + x]) any = true;
         }
         out[y * w + x] = any ? 1 : 0;
       }
@@ -1062,43 +1382,38 @@
     return out;
   }
 
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+  // ===== AUTO-CROP PREVIEW & ACCEPT =====
   function showAutoCropPreview(rect) {
-    // Convert canvas-pixel rect to display-pixel rect
     const displayW = canvas.clientWidth;
     const displayH = canvas.clientHeight;
     const scaleX = displayW / canvas.width;
     const scaleY = displayH / canvas.height;
-
     cropRect = {
       x: rect.x * scaleX,
       y: rect.y * scaleY,
       w: rect.w * scaleX,
       h: rect.h * scaleY,
     };
-
     cropOverlay.classList.add('active');
     cropSelection.classList.add('visible');
     updateCropSelection();
   }
 
-  // Accept auto-crop
   document.getElementById('btn-accept-auto').addEventListener('click', () => {
-    if (autoCropResult) {
-      applyCropRect(autoCropResult);
-    }
+    if (autoCropResult) applyCropRect(autoCropResult);
     autoCropBanner.classList.remove('visible');
     cropOverlay.classList.remove('active');
     cropSelection.classList.remove('visible');
+    showToast('Crop applied');
   });
 
-  // Adjust (switch to manual crop with the auto suggestion pre-loaded)
   document.getElementById('btn-adjust-auto').addEventListener('click', () => {
     autoCropBanner.classList.remove('visible');
-    enterCropMode();
-    // cropRect already set from showAutoCropPreview
+    enterCropMode(); // cropRect already set
   });
 
-  // Skip auto-crop
   document.getElementById('btn-skip-auto').addEventListener('click', () => {
     autoCropBanner.classList.remove('visible');
     cropOverlay.classList.remove('active');
@@ -1107,21 +1422,20 @@
   });
 
   function applyCropRect(rect) {
-    // rect is in full-resolution canvas pixels
     const photo = getActive();
     if (!photo) return;
 
-    drawPhoto(); // ensure canvas is current
+    drawPhoto();
     const sx = Math.max(0, Math.round(rect.x));
     const sy = Math.max(0, Math.round(rect.y));
-    const sw = Math.min(canvas.width - sx, Math.round(rect.w));
-    const sh = Math.min(canvas.height - sy, Math.round(rect.h));
-    if (sw < 10 || sh < 10) return;
+    const cw = Math.min(canvas.width - sx, Math.round(rect.w));
+    const ch = Math.min(canvas.height - sy, Math.round(rect.h));
+    if (cw < 10 || ch < 10) return;
 
-    const imgData = ctx.getImageData(sx, sy, sw, sh);
+    const imgData = ctx.getImageData(sx, sy, cw, ch);
     const tmpC = document.createElement('canvas');
-    tmpC.width = sw;
-    tmpC.height = sh;
+    tmpC.width = cw;
+    tmpC.height = ch;
     tmpC.getContext('2d').putImageData(imgData, 0, 0);
 
     const newImg = new Image();
@@ -1129,6 +1443,7 @@
       photo.currentImg = newImg;
       photo.rotation = 0;
       photo.cropped = true;
+      invalidateThumb(photo);
       drawPhoto();
     };
     newImg.src = tmpC.toDataURL();
@@ -1170,7 +1485,6 @@
 
   document.getElementById('btn-crop-apply').addEventListener('click', () => {
     if (!cropRect || cropRect.w < 5 || cropRect.h < 5) return;
-    // Convert display coords to canvas pixel coords
     const displayW = canvas.clientWidth;
     const displayH = canvas.clientHeight;
     const scaleX = canvas.width / displayW;
@@ -1182,9 +1496,10 @@
       h: cropRect.h * scaleY,
     });
     exitCropMode();
+    showToast('Crop applied');
   });
 
-  // --- Crop interaction (mouse) ---
+  // --- Crop mouse events ---
   cropOverlay.addEventListener('mousedown', (e) => {
     if (e.target.dataset && e.target.dataset.handle) {
       draggingHandle = e.target.dataset.handle;
@@ -1210,10 +1525,8 @@
       return;
     }
     if (movingCrop && cropRect) {
-      const dx = e.offsetX - moveStart.x;
-      const dy = e.offsetY - moveStart.y;
-      cropRect.x = clamp(moveStart.cx + dx, 0, cropOverlay.clientWidth - cropRect.w);
-      cropRect.y = clamp(moveStart.cy + dy, 0, cropOverlay.clientHeight - cropRect.h);
+      cropRect.x = clamp(moveStart.cx + e.offsetX - moveStart.x, 0, cropOverlay.clientWidth - cropRect.w);
+      cropRect.y = clamp(moveStart.cy + e.offsetY - moveStart.y, 0, cropOverlay.clientHeight - cropRect.h);
       updateCropSelection();
       return;
     }
@@ -1239,7 +1552,7 @@
     }
   });
 
-  // --- Crop interaction (touch) ---
+  // --- Crop touch events ---
   cropOverlay.addEventListener('touchstart', (e) => {
     e.preventDefault();
     const touch = e.touches[0];
@@ -1247,12 +1560,8 @@
     const ox = touch.clientX - rect.left;
     const oy = touch.clientY - rect.top;
 
-    // Check handles (larger hit area for touch)
     const handle = closestHandle(ox, oy);
-    if (handle) {
-      draggingHandle = handle;
-      return;
-    }
+    if (handle) { draggingHandle = handle; return; }
 
     if (cropRect && isInsideXY(ox, oy)) {
       movingCrop = true;
@@ -1279,10 +1588,8 @@
       return;
     }
     if (movingCrop && cropRect) {
-      const dx = ox - moveStart.x;
-      const dy = oy - moveStart.y;
-      cropRect.x = clamp(moveStart.cx + dx, 0, cropOverlay.clientWidth - cropRect.w);
-      cropRect.y = clamp(moveStart.cy + dy, 0, cropOverlay.clientHeight - cropRect.h);
+      cropRect.x = clamp(moveStart.cx + ox - moveStart.x, 0, cropOverlay.clientWidth - cropRect.w);
+      cropRect.y = clamp(moveStart.cy + oy - moveStart.y, 0, cropOverlay.clientHeight - cropRect.h);
       updateCropSelection();
       return;
     }
@@ -1306,7 +1613,7 @@
 
   function closestHandle(ox, oy) {
     if (!cropRect) return null;
-    const hitDist = 30;
+    const hitDist = 35;
     const corners = {
       nw: { x: cropRect.x, y: cropRect.y },
       ne: { x: cropRect.x + cropRect.w, y: cropRect.y },
@@ -1335,8 +1642,6 @@
     if (handle === 'nw') { r.w += r.x - mx; r.h += r.y - my; r.x = mx; r.y = my; }
   }
 
-  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-
   function updateCropSelection() {
     if (!cropRect) return;
     const s = cropSelection.style;
@@ -1359,17 +1664,17 @@
       st.style.cssText = sr.style.cssText = sb.style.cssText = sl.style.cssText = 'display:none';
       return;
     }
-    const { x, y, w, h } = cropRect;
+    const { x, y, w: cw, h: ch } = cropRect;
     st.style.cssText = `top:0;left:0;width:${ow}px;height:${y}px;`;
-    sb.style.cssText = `top:${y+h}px;left:0;width:${ow}px;height:${oh-y-h}px;`;
-    sl.style.cssText = `top:${y}px;left:0;width:${x}px;height:${h}px;`;
-    sr.style.cssText = `top:${y}px;left:${x+w}px;width:${ow-x-w}px;height:${h}px;`;
+    sb.style.cssText = `top:${y+ch}px;left:0;width:${ow}px;height:${oh-y-ch}px;`;
+    sl.style.cssText = `top:${y}px;left:0;width:${x}px;height:${ch}px;`;
+    sr.style.cssText = `top:${y}px;left:${x+cw}px;width:${ow-x-cw}px;height:${ch}px;`;
   }
 
   // ===== SAVE =====
   document.getElementById('tool-save').addEventListener('click', () => {
     const p = getActive();
-    if (p) downloadPhoto(p);
+    if (p) { downloadPhoto(p); showToast('Photo saved'); }
   });
 
   function downloadPhoto(photo) {
@@ -1394,6 +1699,11 @@
 
   // ===== INIT =====
   renderGallery();
+
+  // Register service worker for PWA
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 })();
 </script>
 </body>
