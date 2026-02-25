@@ -2,11 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Photo Editor">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#2563eb">
   <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232563eb'/><text x='50' y='62' font-size='50' text-anchor='middle' fill='white'>&#128247;</text></svg>">
   <title>Teacher Photo Editor</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,6 +32,7 @@
       --gray-900: #0f172a;
       --radius: 12px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-top: env(safe-area-inset-top, 0px);
     }
 
     html, body {
@@ -50,6 +54,7 @@
       background: var(--blue);
       color: white;
       padding: 12px 16px;
+      padding-top: calc(12px + var(--safe-top));
       display: flex;
       align-items: center;
       gap: 12px;
@@ -297,6 +302,7 @@
       background: var(--gray-900);
       color: white;
       padding: 10px 12px;
+      padding-top: calc(10px + var(--safe-top));
       display: flex;
       align-items: center;
       gap: 8px;
@@ -1271,31 +1277,9 @@
 
     if (contourPoints.length < 4) return null;
 
-    // Find 4 corners: points closest to each corner of the bounding box
-    // First find bounding box
-    let mnX = sw, mnY = sh, mxX = 0, mxY = 0;
-    for (const p of contourPoints) {
-      if (p.x < mnX) mnX = p.x;
-      if (p.x > mxX) mxX = p.x;
-      if (p.y < mnY) mnY = p.y;
-      if (p.y > mxY) mxY = p.y;
-    }
-
-    // Find the contour point closest to each ideal corner
-    // Using sum/difference method (robust for quadrilateral corner detection)
+    // Find 4 corners using sum/difference method (robust for quadrilateral corner detection)
+    // TL = min(x+y), BR = max(x+y), TR = max(x-y), BL = min(x-y)
     let tlPt = null, trPt = null, blPt = null, brPt = null;
-    let tlMin = Infinity, trMin = Infinity, blMin = Infinity, brMin = Infinity;
-
-    for (const p of contourPoints) {
-      // Top-left: minimize x+y
-      const sumXY = p.x + p.y;
-      if (sumXY < tlMin) { tlMin = sumXY; tlPt = p; }
-      // Bottom-right: maximize x+y
-      if (sumXY > brMin * -1) { /* handled below */ }
-      // Top-right: maximize x-y
-      // Bottom-left: minimize x-y
-    }
-    // Redo properly
     let minSum = Infinity, maxSum = -Infinity, minDiff = Infinity, maxDiff = -Infinity;
     for (const p of contourPoints) {
       const s = p.x + p.y;
@@ -2060,10 +2044,20 @@
     tmpCtx.rotate(rot * Math.PI / 180);
     tmpCtx.drawImage(img, -img.width / 2, -img.height / 2);
 
-    const link = document.createElement('a');
-    link.download = (photo.name || 'photo') + '.jpg';
-    link.href = tmpC.toDataURL('image/jpeg', 0.92);
-    link.click();
+    const fileName = (photo.name || 'photo') + '.jpg';
+
+    // Try blob download (works on most browsers including iOS 14.5+)
+    tmpC.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      // iOS Safari fallback: if download attribute isn't supported, open in new tab
+      // User can then long-press to save the image
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }, 'image/jpeg', 0.92);
   }
 
   // ===== INIT =====
