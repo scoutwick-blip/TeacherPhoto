@@ -495,6 +495,7 @@
         <div class="subtitle">Snap, name, crop &amp; save student projects</div>
       </div>
       <div class="header-right">
+        <button class="header-btn" id="btn-select-mode">Select</button>
         <button class="header-btn" id="btn-save-all">Save All</button>
       </div>
     </div>
@@ -593,7 +594,10 @@
         <span class="tool-icon">&#x21BB;</span>Rotate R
       </button>
       <button class="tool-btn" id="tool-auto-crop">
-        <span class="tool-icon">&#x2728;</span>Auto Crop
+        <span class="tool-icon">&#x2728;</span>Auto
+      </button>
+      <button class="tool-btn" id="tool-flatten">
+        <span class="tool-icon">&#x25F1;</span>Flatten
       </button>
       <button class="tool-btn" id="tool-manual-crop">
         <span class="tool-icon">&#x2702;</span>Crop
@@ -656,6 +660,7 @@
   let moveStart = null;
   let autoCropResult = null;
   let confirmCallback = null;
+  let longPressConsumed = false; // global flag to suppress click after long-press
 
   // ===== DOM REFS =====
   const screenGallery = document.getElementById('screen-gallery');
@@ -682,6 +687,7 @@
   const batchFill     = document.getElementById('batch-progress-fill');
   const batchStatus   = document.getElementById('batch-status');
   const btnBatchCrop  = document.getElementById('btn-batch-crop');
+  const btnSelectMode = document.getElementById('btn-select-mode');
 
   // ===== HELPERS =====
   function escHtml(str) {
@@ -719,6 +725,23 @@
     screenEditor.classList.toggle('active', name === 'editor');
   }
 
+  // ===== SELECT MODE BUTTON =====
+  btnSelectMode.addEventListener('click', () => {
+    if (selectMode) {
+      // Exit select mode
+      photos.forEach(p => p.selected = false);
+      selectMode = false;
+    } else {
+      selectMode = true;
+    }
+    updateSelectModeUI();
+    renderGallery();
+  });
+
+  function updateSelectModeUI() {
+    btnSelectMode.textContent = selectMode ? 'Done' : 'Select';
+  }
+
   // ===== GALLERY =====
   document.getElementById('btn-camera').addEventListener('click', () => fileCamera.click());
   document.getElementById('btn-upload').addEventListener('click', () => fileUpload.click());
@@ -754,7 +777,6 @@
             selected: false,
             thumbCache: null,
           };
-          // Insert at correct position to preserve file order
           photos.splice(firstNewIndex + fileIdx, 0, photo);
           loaded++;
           if (loaded === imageFiles.length) {
@@ -770,6 +792,7 @@
 
   function renderGallery() {
     galleryGrid.innerHTML = '';
+    updateSelectModeUI();
     if (photos.length === 0) {
       galleryGrid.innerHTML = `
         <div class="gallery-empty">
@@ -799,24 +822,22 @@
       `;
       // Touch: long-press to enter select mode
       let pressTimer = null;
-      let pressTriggered = false;
       div.addEventListener('touchstart', () => {
-        pressTriggered = false;
+        longPressConsumed = false;
         pressTimer = setTimeout(() => {
-          pressTriggered = true;
+          longPressConsumed = true;
           selectMode = true;
           photo.selected = true;
+          updateSelectModeUI();
           renderGallery();
         }, 500);
       }, { passive: true });
-      div.addEventListener('touchend', (e) => {
-        clearTimeout(pressTimer);
-        if (pressTriggered) { e.preventDefault(); return; }
-      });
-      div.addEventListener('touchmove', () => { clearTimeout(pressTimer); });
+      div.addEventListener('touchend', () => { clearTimeout(pressTimer); });
+      div.addEventListener('touchmove', () => { clearTimeout(pressTimer); longPressConsumed = false; });
 
-      div.addEventListener('click', () => {
-        if (pressTriggered) return;
+      div.addEventListener('click', (e) => {
+        // Suppress click that follows a long-press
+        if (longPressConsumed) { longPressConsumed = false; e.preventDefault(); return; }
         if (selectMode) {
           photo.selected = !photo.selected;
           renderGallery();
@@ -859,6 +880,7 @@
   document.getElementById('btn-deselect').addEventListener('click', () => {
     photos.forEach(p => p.selected = false);
     selectMode = false;
+    updateSelectModeUI();
     renderGallery();
   });
 
@@ -875,6 +897,7 @@
           if (photos[i].selected) photos.splice(i, 1);
         }
         selectMode = false;
+        updateSelectModeUI();
         renderGallery();
         showToast(`${count} photo${count !== 1 ? 's' : ''} deleted`);
       }
@@ -888,6 +911,7 @@
     selected.forEach(p => downloadPhoto(p));
     photos.forEach(p => p.selected = false);
     selectMode = false;
+    updateSelectModeUI();
     renderGallery();
     showToast(`${selected.length} photo${selected.length !== 1 ? 's' : ''} saved`);
   });
@@ -1092,6 +1116,351 @@
     drawPhoto();
     showToast('Reset to original');
   });
+
+  // ===== PERSPECTIVE FLATTEN =====
+  document.getElementById('tool-flatten').addEventListener('click', () => {
+    const photo = getActive();
+    if (!photo) return;
+    scanOverlay.classList.add('visible');
+    document.querySelector('.scan-text').textContent = 'Detecting perspective...';
+
+    setTimeout(() => {
+      const result = detectAndFlatten(photo);
+      scanOverlay.classList.remove('visible');
+      document.querySelector('.scan-text').textContent = 'Scanning for project edges...';
+
+      if (result) {
+        photo.currentImg = result;
+        photo.rotation = 0;
+        photo.cropped = true;
+        invalidateThumb(photo);
+        drawPhoto();
+        showToast('Photo flattened');
+      } else {
+        showToast('Could not detect perspective');
+      }
+    }, 100);
+  });
+
+  function detectAndFlatten(photo) {
+    // Render current state to analyze
+    const img = photo.currentImg;
+    const rot = photo.rotation;
+    let fullW, fullH;
+    if (rot === 90 || rot === 270) { fullW = img.height; fullH = img.width; }
+    else { fullW = img.width; fullH = img.height; }
+
+    const srcCanvas = document.createElement('canvas');
+    const srcCtx = srcCanvas.getContext('2d');
+    srcCanvas.width = fullW;
+    srcCanvas.height = fullH;
+    srcCtx.translate(fullW / 2, fullH / 2);
+    srcCtx.rotate(rot * Math.PI / 180);
+    srcCtx.drawImage(img, -img.width / 2, -img.height / 2);
+
+    // Downsample for corner detection
+    const maxDim = 500;
+    const scale = Math.min(maxDim / fullW, maxDim / fullH, 1);
+    const sw = Math.round(fullW * scale);
+    const sh = Math.round(fullH * scale);
+
+    const tmpC = document.createElement('canvas');
+    const tmpCtx = tmpC.getContext('2d');
+    tmpC.width = sw;
+    tmpC.height = sh;
+    tmpCtx.drawImage(srcCanvas, 0, 0, sw, sh);
+
+    const imageData = tmpCtx.getImageData(0, 0, sw, sh);
+    const data = imageData.data;
+
+    // Grayscale + blur + edge detection
+    const gray = new Float32Array(sw * sh);
+    for (let i = 0; i < sw * sh; i++) {
+      const ri = i * 4;
+      gray[i] = 0.299 * data[ri] + 0.587 * data[ri+1] + 0.114 * data[ri+2];
+    }
+    const blurred = gaussianBlur3x3(gray, sw, sh);
+    const edges = sobelEdges(blurred, sw, sh);
+
+    // Background + foreground mask (same as auto-crop)
+    const bandW = Math.max(4, Math.round(sw * 0.08));
+    const bandH = Math.max(4, Math.round(sh * 0.08));
+    const borderPixels = [];
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        if (y < bandH || y >= sh - bandH || x < bandW || x >= sw - bandW) {
+          const ri = (y * sw + x) * 4;
+          borderPixels.push([data[ri], data[ri+1], data[ri+2]]);
+        }
+      }
+    }
+    const bgR = median(borderPixels.map(p => p[0]));
+    const bgG = median(borderPixels.map(p => p[1]));
+    const bgB = median(borderPixels.map(p => p[2]));
+
+    const colorDists = new Float32Array(sw * sh);
+    let distSum = 0, distSqSum = 0;
+    for (let i = 0; i < sw * sh; i++) {
+      const ri = i * 4;
+      const dr = data[ri] - bgR, dg = data[ri+1] - bgG, db = data[ri+2] - bgB;
+      const d = Math.sqrt(dr*dr + dg*dg + db*db);
+      colorDists[i] = d;
+      distSum += d;
+      distSqSum += d * d;
+    }
+    const distMean = distSum / (sw * sh);
+    const distStd = Math.sqrt(distSqSum / (sw * sh) - distMean * distMean);
+    const colorThreshold = clamp(distMean - 0.5 * distStd, 20, 60);
+
+    let edgeMax = 0;
+    for (let i = 0; i < edges.length; i++) if (edges[i] > edgeMax) edgeMax = edges[i];
+    const edgeThreshold = edgeMax * 0.15;
+
+    const mask = new Uint8Array(sw * sh);
+    for (let i = 0; i < sw * sh; i++) {
+      mask[i] = (colorDists[i] > colorThreshold || edges[i] > edgeThreshold) ? 1 : 0;
+    }
+
+    const r = Math.max(2, Math.round(Math.min(sw, sh) * 0.008));
+    const cleaned = morphDilate(morphErode(morphErode(morphDilate(mask, sw, sh, r), sw, sh, r), sw, sh, r+1), sw, sh, r+1);
+
+    // Find largest component
+    const labels = new Int32Array(sw * sh);
+    labels.fill(-1);
+    const comps = [];
+    let nextLabel = 0;
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const idx = y * sw + x;
+        if (cleaned[idx] && labels[idx] === -1) {
+          const label = nextLabel++;
+          let size = 0;
+          const queue = [idx];
+          labels[idx] = label;
+          while (queue.length > 0) {
+            const ci = queue.pop();
+            size++;
+            const cx = ci % sw, cy = (ci - cx) / sw;
+            for (const ni of [cy > 0 ? ci-sw : -1, cy < sh-1 ? ci+sw : -1, cx > 0 ? ci-1 : -1, cx < sw-1 ? ci+1 : -1]) {
+              if (ni >= 0 && cleaned[ni] && labels[ni] === -1) { labels[ni] = label; queue.push(ni); }
+            }
+          }
+          comps.push({ label, size });
+        }
+      }
+    }
+    if (comps.length === 0) return null;
+    comps.sort((a, b) => b.size - a.size);
+    const mainLabel = comps[0].label;
+    if (comps[0].size / (sw * sh) < 0.05 || comps[0].size / (sw * sh) > 0.92) return null;
+
+    // Extract contour points of the largest component
+    const contourPoints = [];
+    for (let y = 1; y < sh - 1; y++) {
+      for (let x = 1; x < sw - 1; x++) {
+        if (labels[y * sw + x] === mainLabel) {
+          // Check if border pixel (has at least one non-mainLabel neighbor)
+          const isEdge = (
+            labels[(y-1)*sw+x] !== mainLabel || labels[(y+1)*sw+x] !== mainLabel ||
+            labels[y*sw+(x-1)] !== mainLabel || labels[y*sw+(x+1)] !== mainLabel
+          );
+          if (isEdge) contourPoints.push({ x, y });
+        }
+      }
+    }
+
+    if (contourPoints.length < 4) return null;
+
+    // Find 4 corners: points closest to each corner of the bounding box
+    // First find bounding box
+    let mnX = sw, mnY = sh, mxX = 0, mxY = 0;
+    for (const p of contourPoints) {
+      if (p.x < mnX) mnX = p.x;
+      if (p.x > mxX) mxX = p.x;
+      if (p.y < mnY) mnY = p.y;
+      if (p.y > mxY) mxY = p.y;
+    }
+
+    // Find the contour point closest to each ideal corner
+    // Using sum/difference method (robust for quadrilateral corner detection)
+    let tlPt = null, trPt = null, blPt = null, brPt = null;
+    let tlMin = Infinity, trMin = Infinity, blMin = Infinity, brMin = Infinity;
+
+    for (const p of contourPoints) {
+      // Top-left: minimize x+y
+      const sumXY = p.x + p.y;
+      if (sumXY < tlMin) { tlMin = sumXY; tlPt = p; }
+      // Bottom-right: maximize x+y
+      if (sumXY > brMin * -1) { /* handled below */ }
+      // Top-right: maximize x-y
+      // Bottom-left: minimize x-y
+    }
+    // Redo properly
+    let minSum = Infinity, maxSum = -Infinity, minDiff = Infinity, maxDiff = -Infinity;
+    for (const p of contourPoints) {
+      const s = p.x + p.y;
+      const d = p.x - p.y;
+      if (s < minSum)  { minSum = s;  tlPt = p; }
+      if (s > maxSum)  { maxSum = s;  brPt = p; }
+      if (d < minDiff) { minDiff = d; blPt = p; }
+      if (d > maxDiff) { maxDiff = d; trPt = p; }
+    }
+
+    if (!tlPt || !trPt || !blPt || !brPt) return null;
+
+    // Scale corners back to full resolution
+    const corners = [
+      { x: tlPt.x / scale, y: tlPt.y / scale },
+      { x: trPt.x / scale, y: trPt.y / scale },
+      { x: brPt.x / scale, y: brPt.y / scale },
+      { x: blPt.x / scale, y: blPt.y / scale },
+    ];
+
+    // Check if corners form a reasonable quadrilateral (not too skewed)
+    const topW = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
+    const botW = Math.hypot(corners[2].x - corners[3].x, corners[2].y - corners[3].y);
+    const leftH = Math.hypot(corners[3].x - corners[0].x, corners[3].y - corners[0].y);
+    const rightH = Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y);
+
+    const outW = Math.round(Math.max(topW, botW));
+    const outH = Math.round(Math.max(leftH, rightH));
+    if (outW < 50 || outH < 50) return null;
+
+    // Compute perspective transform and warp
+    return perspectiveWarp(srcCanvas, corners, outW, outH);
+  }
+
+  function perspectiveWarp(srcCanvas, corners, outW, outH) {
+    // corners: [TL, TR, BR, BL] in source coordinates
+    // Compute 3x3 homography from destination rect -> source quad
+    const dst = [
+      { x: 0, y: 0 },
+      { x: outW, y: 0 },
+      { x: outW, y: outH },
+      { x: 0, y: outH },
+    ];
+
+    const H = computeHomography(dst, corners);
+    if (!H) return null;
+
+    // Read source pixels
+    const srcCtx = srcCanvas.getContext('2d');
+    const srcData = srcCtx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+    const srcPx = srcData.data;
+    const srcW = srcCanvas.width;
+    const srcH = srcCanvas.height;
+
+    // Create output
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = outW;
+    outCanvas.height = outH;
+    const outCtx = outCanvas.getContext('2d');
+    const outData = outCtx.createImageData(outW, outH);
+    const outPx = outData.data;
+
+    // For each output pixel, find corresponding source pixel via homography
+    for (let oy = 0; oy < outH; oy++) {
+      for (let ox = 0; ox < outW; ox++) {
+        // Apply H: [sx, sy, sw] = H * [ox, oy, 1]
+        const sw2 = H[6] * ox + H[7] * oy + H[8];
+        const sx = (H[0] * ox + H[1] * oy + H[2]) / sw2;
+        const sy = (H[3] * ox + H[4] * oy + H[5]) / sw2;
+
+        // Bilinear interpolation
+        const x0 = Math.floor(sx), y0 = Math.floor(sy);
+        const x1 = x0 + 1, y1 = y0 + 1;
+        const fx = sx - x0, fy = sy - y0;
+
+        if (x0 >= 0 && x1 < srcW && y0 >= 0 && y1 < srcH) {
+          const i00 = (y0 * srcW + x0) * 4;
+          const i10 = (y0 * srcW + x1) * 4;
+          const i01 = (y1 * srcW + x0) * 4;
+          const i11 = (y1 * srcW + x1) * 4;
+          const oi = (oy * outW + ox) * 4;
+
+          for (let c = 0; c < 3; c++) {
+            outPx[oi + c] = Math.round(
+              srcPx[i00+c] * (1-fx) * (1-fy) +
+              srcPx[i10+c] * fx * (1-fy) +
+              srcPx[i01+c] * (1-fx) * fy +
+              srcPx[i11+c] * fx * fy
+            );
+          }
+          outPx[oi + 3] = 255;
+        }
+      }
+    }
+
+    outCtx.putImageData(outData, 0, 0);
+
+    // Convert to Image
+    const newImg = new Image();
+    newImg.src = outCanvas.toDataURL();
+    return newImg;
+  }
+
+  function computeHomography(src, dst) {
+    // Solves for 3x3 H where dst = H * src (in homogeneous coords)
+    // Using DLT (Direct Linear Transform) with 4 point correspondences
+    // Builds 8x9 matrix A, finds null space
+    const A = [];
+    for (let i = 0; i < 4; i++) {
+      const sx = src[i].x, sy = src[i].y;
+      const dx = dst[i].x, dy = dst[i].y;
+      A.push([-sx, -sy, -1, 0, 0, 0, dx*sx, dx*sy, dx]);
+      A.push([0, 0, 0, -sx, -sy, -1, dy*sx, dy*sy, dy]);
+    }
+
+    // Solve Ah = 0 using SVD-like approach
+    // For 4 points this is exactly determined, solve via elimination
+    // Using a simplified approach: solve 8 equations for 8 unknowns (h9 = 1)
+    const M = [];
+    const b = [];
+    for (let i = 0; i < 4; i++) {
+      const sx = src[i].x, sy = src[i].y;
+      const dx = dst[i].x, dy = dst[i].y;
+      M.push([sx, sy, 1, 0, 0, 0, -dx*sx, -dx*sy]);
+      b.push(dx);
+      M.push([0, 0, 0, sx, sy, 1, -dy*sx, -dy*sy]);
+      b.push(dy);
+    }
+
+    // Gaussian elimination
+    const n = 8;
+    const aug = M.map((row, i) => [...row, b[i]]);
+
+    for (let col = 0; col < n; col++) {
+      // Find pivot
+      let maxVal = 0, maxRow = col;
+      for (let row = col; row < n; row++) {
+        if (Math.abs(aug[row][col]) > maxVal) {
+          maxVal = Math.abs(aug[row][col]);
+          maxRow = row;
+        }
+      }
+      if (maxVal < 1e-10) return null;
+
+      // Swap
+      [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
+
+      // Eliminate
+      for (let row = 0; row < n; row++) {
+        if (row === col) continue;
+        const factor = aug[row][col] / aug[col][col];
+        for (let j = col; j <= n; j++) {
+          aug[row][j] -= factor * aug[col][j];
+        }
+      }
+    }
+
+    const h = [];
+    for (let i = 0; i < n; i++) {
+      h.push(aug[i][n] / aug[i][i]);
+    }
+    h.push(1); // h9
+
+    return h;
+  }
 
   // ===== AI AUTO-CROP (IMPROVED) =====
   document.getElementById('tool-auto-crop').addEventListener('click', () => runAutoCrop());
