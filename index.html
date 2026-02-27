@@ -9,18 +9,14 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#2563eb">
   <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232563eb'/><text x='50' y='62' font-size='50' text-anchor='middle' fill='white'>&#128247;</text></svg>">
   <title>Teacher Photo Editor</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
       --blue: #2563eb;
-      --blue-light: #dbeafe;
       --blue-dark: #1e40af;
       --green: #16a34a;
-      --green-light: #d1fae5;
-      --amber: #f59e0b;
       --amber-light: #fef3c7;
       --red: #dc2626;
       --gray-50: #f8fafc;
@@ -942,6 +938,13 @@
     batchFill.style.width = '0%';
     batchStatus.textContent = `0 / ${total}`;
 
+    function advance() {
+      processed++;
+      batchFill.style.width = Math.round((processed / total) * 100) + '%';
+      batchStatus.textContent = `${processed} / ${total}`;
+      setTimeout(processNext, 20);
+    }
+
     function processNext() {
       if (processed >= total) {
         batchOverlay.classList.remove('visible');
@@ -952,20 +955,15 @@
       const photo = targets[processed];
       const bounds = detectProjectBounds(photo);
       if (bounds) {
-        applyAutoCropToPhoto(photo, bounds);
-        success++;
+        applyAutoCropToPhoto(photo, bounds, () => { success++; advance(); });
+      } else {
+        advance();
       }
-      processed++;
-      batchFill.style.width = Math.round((processed / total) * 100) + '%';
-      batchStatus.textContent = `${processed} / ${total}`;
-      // Yield to UI
-      setTimeout(processNext, 20);
     }
     setTimeout(processNext, 50);
   }
 
-  function applyAutoCropToPhoto(photo, rect) {
-    // Render the photo to a temp canvas, crop, and replace
+  function applyAutoCropToPhoto(photo, rect, callback) {
     const img = photo.currentImg;
     const rot = photo.rotation;
     let w, h;
@@ -984,7 +982,7 @@
     const sy = Math.max(0, Math.round(rect.y));
     const sw = Math.min(w - sx, Math.round(rect.w));
     const sh = Math.min(h - sy, Math.round(rect.h));
-    if (sw < 10 || sh < 10) return;
+    if (sw < 10 || sh < 10) { if (callback) callback(); return; }
 
     const imgData = tmpCtx.getImageData(sx, sy, sw, sh);
     const cropC = document.createElement('canvas');
@@ -998,6 +996,7 @@
       photo.rotation = 0;
       photo.cropped = true;
       invalidateThumb(photo);
+      if (callback) callback();
     };
     newImg.src = cropC.toDataURL();
   }
@@ -1036,10 +1035,7 @@
 
   editorName.addEventListener('input', () => {
     const photo = getActive();
-    if (photo) {
-      photo.name = editorName.value;
-      invalidateThumb(photo);
-    }
+    if (photo) photo.name = editorName.value;
   });
 
   function navigateTo(idx) {
@@ -1151,7 +1147,7 @@
   });
 
   function detectAndFlatten(photo) {
-    // Render current state to analyze
+    // Create full-res source canvas for warp
     const img = photo.currentImg;
     const rot = photo.rotation;
     let fullW, fullH;
@@ -1166,111 +1162,21 @@
     srcCtx.rotate(rot * Math.PI / 180);
     srcCtx.drawImage(img, -img.width / 2, -img.height / 2);
 
-    // Downsample for corner detection
-    const maxDim = 500;
-    const scale = Math.min(maxDim / fullW, maxDim / fullH, 1);
-    const sw = Math.round(fullW * scale);
-    const sh = Math.round(fullH * scale);
+    // Use shared detection on downsampled image
+    const prep = prepareImageData(photo);
+    const analysis = analyzeImage(prep.data, prep.sw, prep.sh);
+    if (!analysis) return null;
+    const { labels, bestLabel } = analysis;
+    const sw = prep.sw, sh = prep.sh, scale = prep.scale;
 
-    const tmpC = document.createElement('canvas');
-    const tmpCtx = tmpC.getContext('2d');
-    tmpC.width = sw;
-    tmpC.height = sh;
-    tmpCtx.drawImage(srcCanvas, 0, 0, sw, sh);
-
-    const imageData = tmpCtx.getImageData(0, 0, sw, sh);
-    const data = imageData.data;
-
-    // Grayscale + blur + edge detection
-    const gray = new Float32Array(sw * sh);
-    for (let i = 0; i < sw * sh; i++) {
-      const ri = i * 4;
-      gray[i] = 0.299 * data[ri] + 0.587 * data[ri+1] + 0.114 * data[ri+2];
-    }
-    const blurred = gaussianBlur3x3(gray, sw, sh);
-    const edges = sobelEdges(blurred, sw, sh);
-
-    // Background + foreground mask (same as auto-crop)
-    const bandW = Math.max(4, Math.round(sw * 0.08));
-    const bandH = Math.max(4, Math.round(sh * 0.08));
-    const borderPixels = [];
-    for (let y = 0; y < sh; y++) {
-      for (let x = 0; x < sw; x++) {
-        if (y < bandH || y >= sh - bandH || x < bandW || x >= sw - bandW) {
-          const ri = (y * sw + x) * 4;
-          borderPixels.push([data[ri], data[ri+1], data[ri+2]]);
-        }
-      }
-    }
-    const bgR = median(borderPixels.map(p => p[0]));
-    const bgG = median(borderPixels.map(p => p[1]));
-    const bgB = median(borderPixels.map(p => p[2]));
-
-    const colorDists = new Float32Array(sw * sh);
-    let distSum = 0, distSqSum = 0;
-    for (let i = 0; i < sw * sh; i++) {
-      const ri = i * 4;
-      const dr = data[ri] - bgR, dg = data[ri+1] - bgG, db = data[ri+2] - bgB;
-      const d = Math.sqrt(dr*dr + dg*dg + db*db);
-      colorDists[i] = d;
-      distSum += d;
-      distSqSum += d * d;
-    }
-    const distMean = distSum / (sw * sh);
-    const distStd = Math.sqrt(distSqSum / (sw * sh) - distMean * distMean);
-    const colorThreshold = clamp(distMean - 0.5 * distStd, 20, 60);
-
-    let edgeMax = 0;
-    for (let i = 0; i < edges.length; i++) if (edges[i] > edgeMax) edgeMax = edges[i];
-    const edgeThreshold = edgeMax * 0.15;
-
-    const mask = new Uint8Array(sw * sh);
-    for (let i = 0; i < sw * sh; i++) {
-      mask[i] = (colorDists[i] > colorThreshold || edges[i] > edgeThreshold) ? 1 : 0;
-    }
-
-    const r = Math.max(2, Math.round(Math.min(sw, sh) * 0.008));
-    const cleaned = morphDilate(morphErode(morphErode(morphDilate(mask, sw, sh, r), sw, sh, r), sw, sh, r+1), sw, sh, r+1);
-
-    // Find largest component
-    const labels = new Int32Array(sw * sh);
-    labels.fill(-1);
-    const comps = [];
-    let nextLabel = 0;
-    for (let y = 0; y < sh; y++) {
-      for (let x = 0; x < sw; x++) {
-        const idx = y * sw + x;
-        if (cleaned[idx] && labels[idx] === -1) {
-          const label = nextLabel++;
-          let size = 0;
-          const queue = [idx];
-          labels[idx] = label;
-          while (queue.length > 0) {
-            const ci = queue.pop();
-            size++;
-            const cx = ci % sw, cy = (ci - cx) / sw;
-            for (const ni of [cy > 0 ? ci-sw : -1, cy < sh-1 ? ci+sw : -1, cx > 0 ? ci-1 : -1, cx < sw-1 ? ci+1 : -1]) {
-              if (ni >= 0 && cleaned[ni] && labels[ni] === -1) { labels[ni] = label; queue.push(ni); }
-            }
-          }
-          comps.push({ label, size });
-        }
-      }
-    }
-    if (comps.length === 0) return null;
-    comps.sort((a, b) => b.size - a.size);
-    const mainLabel = comps[0].label;
-    if (comps[0].size / (sw * sh) < 0.05 || comps[0].size / (sw * sh) > 0.92) return null;
-
-    // Extract contour points of the largest component
+    // Extract contour points of the best component
     const contourPoints = [];
     for (let y = 1; y < sh - 1; y++) {
       for (let x = 1; x < sw - 1; x++) {
-        if (labels[y * sw + x] === mainLabel) {
-          // Check if border pixel (has at least one non-mainLabel neighbor)
+        if (labels[y * sw + x] === bestLabel) {
           const isEdge = (
-            labels[(y-1)*sw+x] !== mainLabel || labels[(y+1)*sw+x] !== mainLabel ||
-            labels[y*sw+(x-1)] !== mainLabel || labels[y*sw+(x+1)] !== mainLabel
+            labels[(y-1)*sw+x] !== bestLabel || labels[(y+1)*sw+x] !== bestLabel ||
+            labels[y*sw+(x-1)] !== bestLabel || labels[y*sw+(x+1)] !== bestLabel
           );
           if (isEdge) contourPoints.push({ x, y });
         }
@@ -1279,8 +1185,7 @@
 
     if (contourPoints.length < 4) return null;
 
-    // Find 4 corners using sum/difference method (robust for quadrilateral corner detection)
-    // TL = min(x+y), BR = max(x+y), TR = max(x-y), BL = min(x-y)
+    // Find 4 corners using sum/difference method
     let tlPt = null, trPt = null, blPt = null, brPt = null;
     let minSum = Infinity, maxSum = -Infinity, minDiff = Infinity, maxDiff = -Infinity;
     for (const p of contourPoints) {
@@ -1302,7 +1207,7 @@
       { x: blPt.x / scale, y: blPt.y / scale },
     ];
 
-    // Check if corners form a reasonable quadrilateral (not too skewed)
+    // Check if corners form a reasonable quadrilateral
     const topW = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
     const botW = Math.hypot(corners[2].x - corners[3].x, corners[2].y - corners[3].y);
     const leftH = Math.hypot(corners[3].x - corners[0].x, corners[3].y - corners[0].y);
@@ -1312,7 +1217,6 @@
     const outH = Math.round(Math.max(leftH, rightH));
     if (outW < 50 || outH < 50) return null;
 
-    // Compute perspective transform and warp
     return perspectiveWarp(srcCanvas, corners, outW, outH);
   }
 
@@ -1382,20 +1286,7 @@
   }
 
   function computeHomography(src, dst) {
-    // Solves for 3x3 H where dst = H * src (in homogeneous coords)
-    // Using DLT (Direct Linear Transform) with 4 point correspondences
-    // Builds 8x9 matrix A, finds null space
-    const A = [];
-    for (let i = 0; i < 4; i++) {
-      const sx = src[i].x, sy = src[i].y;
-      const dx = dst[i].x, dy = dst[i].y;
-      A.push([-sx, -sy, -1, 0, 0, 0, dx*sx, dx*sy, dx]);
-      A.push([0, 0, 0, -sx, -sy, -1, dy*sx, dy*sy, dy]);
-    }
-
-    // Solve Ah = 0 using SVD-like approach
-    // For 4 points this is exactly determined, solve via elimination
-    // Using a simplified approach: solve 8 equations for 8 unknowns (h9 = 1)
+    // DLT: solve 8 equations for 8 unknowns (h9 = 1) via Gaussian elimination
     const M = [];
     const b = [];
     for (let i = 0; i < 4; i++) {
@@ -1466,45 +1357,38 @@
     }, 100);
   }
 
-  function detectProjectBounds(photo) {
+  // ===== SHARED IMAGE ANALYSIS =====
+  function prepareImageData(photo) {
     const img = photo.currentImg;
     const rot = photo.rotation;
     let w, h;
     if (rot === 90 || rot === 270) { w = img.height; h = img.width; }
     else { w = img.width; h = img.height; }
-
-    const tmpC = document.createElement('canvas');
-    const tmpCtx = tmpC.getContext('2d');
-
-    // Downsample for speed
     const maxDim = 500;
     const scale = Math.min(maxDim / w, maxDim / h, 1);
     const sw = Math.round(w * scale);
     const sh = Math.round(h * scale);
+    const tmpC = document.createElement('canvas');
+    const tmpCtx = tmpC.getContext('2d');
     tmpC.width = sw;
     tmpC.height = sh;
     tmpCtx.translate(sw / 2, sh / 2);
     tmpCtx.rotate(rot * Math.PI / 180);
     tmpCtx.drawImage(img, -img.width * scale / 2, -img.height * scale / 2, img.width * scale, img.height * scale);
+    return { data: tmpCtx.getImageData(0, 0, sw, sh).data, sw, sh, scale };
+  }
 
-    const imageData = tmpCtx.getImageData(0, 0, sw, sh);
-    const data = imageData.data;
-
-    // Step 1: Grayscale
+  function analyzeImage(data, sw, sh) {
+    // Grayscale + blur + Sobel edges
     const gray = new Float32Array(sw * sh);
     for (let i = 0; i < sw * sh; i++) {
       const ri = i * 4;
       gray[i] = 0.299 * data[ri] + 0.587 * data[ri+1] + 0.114 * data[ri+2];
     }
-
-    // Step 2: Gaussian blur
     const blurred = gaussianBlur3x3(gray, sw, sh);
-
-    // Step 3: Sobel edge detection on grayscale
     const edges = sobelEdges(blurred, sw, sh);
 
-    // Step 3b: Color gradient magnitude — detect edges between same-brightness but different-colored areas
-    // (e.g. red paper on green desk has low grayscale gradient but high color gradient)
+    // Color gradient magnitude (RGB Sobel — catches edges between same-brightness colors)
     const colorEdges = new Float32Array(sw * sh);
     for (let y = 1; y < sh - 1; y++) {
       for (let x = 1; x < sw - 1; x++) {
@@ -1522,7 +1406,7 @@
       }
     }
 
-    // Step 4: Sample border band for background color
+    // Background color from border band
     const bandW = Math.max(4, Math.round(sw * 0.1));
     const bandH = Math.max(4, Math.round(sh * 0.1));
     const borderPixels = [];
@@ -1534,50 +1418,45 @@
         }
       }
     }
-
     const bgR = median(borderPixels.map(p => p[0]));
     const bgG = median(borderPixels.map(p => p[1]));
     const bgB = median(borderPixels.map(p => p[2]));
 
-    // Step 5: Color distance from background
+    // Color distance from background + Otsu threshold
     const colorDists = new Float32Array(sw * sh);
     for (let i = 0; i < sw * sh; i++) {
       const ri = i * 4;
       const dr = data[ri] - bgR, dg = data[ri+1] - bgG, db = data[ri+2] - bgB;
       colorDists[i] = Math.sqrt(dr*dr + dg*dg + db*db);
     }
-
-    // Otsu's method for optimal color distance threshold
     const colorThreshold = otsuThreshold(colorDists, sw * sh);
 
     // Edge thresholds
     let edgeMax = 0;
     for (let i = 0; i < edges.length; i++) if (edges[i] > edgeMax) edgeMax = edges[i];
     const edgeThreshold = edgeMax * 0.15;
-
     let colorEdgeMax = 0;
     for (let i = 0; i < colorEdges.length; i++) if (colorEdges[i] > colorEdgeMax) colorEdgeMax = colorEdges[i];
     const colorEdgeThreshold = colorEdgeMax * 0.12;
 
-    // Combined mask: foreground if color differs OR strong grayscale edge OR strong color edge
+    // Combined mask
     const mask = new Uint8Array(sw * sh);
     for (let i = 0; i < sw * sh; i++) {
       mask[i] = (colorDists[i] > colorThreshold || edges[i] > edgeThreshold || colorEdges[i] > colorEdgeThreshold) ? 1 : 0;
     }
 
-    // Step 6: Morphological close then open
+    // Morphological close then open
     const radius = Math.max(2, Math.round(Math.min(sw, sh) * 0.008));
     const closed = morphDilate(mask, sw, sh, radius);
     const closedEroded = morphErode(closed, sw, sh, radius);
     const opened = morphErode(closedEroded, sw, sh, radius + 1);
     const cleaned = morphDilate(opened, sw, sh, radius + 1);
 
-    // Step 7: Connected component analysis with centroid tracking
+    // Connected components with centroid tracking
     const labels = new Int32Array(sw * sh);
     labels.fill(-1);
     const comps = [];
     let nextLabel = 0;
-
     for (let y = 0; y < sh; y++) {
       for (let x = 0; x < sw; x++) {
         const idx = y * sw + x;
@@ -1591,29 +1470,22 @@
             size++;
             const cx = ci % sw;
             const cy = (ci - cx) / sw;
-            sumX += cx;
-            sumY += cy;
+            sumX += cx; sumY += cy;
             const neighbors = [
-              cy > 0 ? ci - sw : -1,
-              cy < sh - 1 ? ci + sw : -1,
-              cx > 0 ? ci - 1 : -1,
-              cx < sw - 1 ? ci + 1 : -1,
+              cy > 0 ? ci - sw : -1, cy < sh - 1 ? ci + sw : -1,
+              cx > 0 ? ci - 1 : -1, cx < sw - 1 ? ci + 1 : -1,
             ];
             for (const ni of neighbors) {
-              if (ni >= 0 && cleaned[ni] && labels[ni] === -1) {
-                labels[ni] = label;
-                queue.push(ni);
-              }
+              if (ni >= 0 && cleaned[ni] && labels[ni] === -1) { labels[ni] = label; queue.push(ni); }
             }
           }
           comps.push({ label, size, sumX, sumY });
         }
       }
     }
-
     if (comps.length === 0) return null;
 
-    // Score components by size * centrality (prefer centered objects — student projects are usually centered)
+    // Score by size * centrality (prefer centered objects)
     const halfW = sw / 2, halfH = sh / 2;
     const maxDist = Math.hypot(halfW, halfH);
     for (const c of comps) {
@@ -1626,12 +1498,18 @@
     comps.sort((a, b) => b.score - a.score);
 
     const bestLabel = comps[0].label;
-    const bestSize = comps[0].size;
-
-    const fgRatio = bestSize / (sw * sh);
+    const fgRatio = comps[0].size / (sw * sh);
     if (fgRatio < 0.05 || fgRatio > 0.92) return null;
+    return { labels, bestLabel };
+  }
 
-    // Step 8: Bounding box of best component
+  function detectProjectBounds(photo) {
+    const prep = prepareImageData(photo);
+    const analysis = analyzeImage(prep.data, prep.sw, prep.sh);
+    if (!analysis) return null;
+    const { labels, bestLabel } = analysis;
+    const sw = prep.sw, sh = prep.sh, scale = prep.scale;
+
     let minX = sw, minY = sh, maxX = 0, maxY = 0;
     for (let y = 0; y < sh; y++) {
       for (let x = 0; x < sw; x++) {
@@ -1643,10 +1521,8 @@
         }
       }
     }
-
     if (maxX - minX < sw * 0.08 || maxY - minY < sh * 0.08) return null;
 
-    // Step 9: Padding
     const pad = Math.round(Math.min(sw, sh) * 0.015);
     minX = Math.max(0, minX - pad);
     minY = Math.max(0, minY - pad);
